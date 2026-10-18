@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top" /> 
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>Kitchen Order System</title>
+    <style>
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        padding: 10px;
+        background-color: #f4f4f9;
+        margin: 0;
+        -webkit-text-size-adjust: 100%;
+      }
+
+      h2 {
+        font-size: 1.5rem;
+        margin: 15px 5px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      #refreshingStatus {
+        font-size: 0.8rem;
+        color: #2196f3;
+        font-weight: normal;
+        background: #e3f2fd;
+        padding: 2px 8px;
+        border-radius: 10px;
+      }
+
+      .section-title {
+        font-size: 1.2rem;
+        font-weight: bold;
+        margin: 20px 5px 10px 5px;
+        padding-bottom: 5px;
+        border-bottom: 2px solid #2196f3;
+        color: #333;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .section-title i {
+        font-size: 1.3rem;
+      }
+
+      .order-container {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-top: 10px;
+      }
+
+      .order-card {
+        background: white;
+        padding: 6px 10px;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        cursor: pointer;
+        border-left: 8px solid #ff9800;
+        transition: transform 0.1s;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .order-card:active {
+        transform: scale(0.98);
+        background: #fafafa;
+      }
+
+      .order-info {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 8px;
+      }
+
+      .menu-name {
+        font-weight: bold;
+        font-size: 1.3rem;
+        color: #333;
+        line-height: 1.2;
+      }
+
+      .time-stamp {
+        color: #777;
+        font-size: 0.9rem;
+        background: #eee;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+
+      .order-status-row {
+        font-size: 1.1rem;
+        color: #555;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .order-status-row strong {
+        color: #000;
+        text-transform: uppercase;
+        background: #f0f0f0;
+        padding: 0 5px;
+        border-radius: 3px;
+      }
+
+      .badge-session {
+        font-size: 0.8rem;
+        color: #888;
+        background: #e8e8e8;
+        padding: 2px 8px;
+        border-radius: 12px;
+      }
+
+      .call-card {
+        background: #fff3f3;
+        border-left: 8px solid #e53935;
+        padding: 8px 12px;
+        border-radius: 10px;
+        margin-bottom: 8px;
+        box-shadow: 0 2px 4px rgba(229, 57, 53, 0.2);
+        animation: blink 1.5s infinite alternate;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .call-card:active {
+        transform: scale(0.98);
+      }
+
+      @keyframes blink {
+        from {
+          opacity: 1;
+        }
+        to {
+          opacity: 0.8;
+        }
+      }
+
+      .fade-out {
+        opacity: 0;
+        transform: scale(0.9);
+        transition: all 0.3s ease;
+        pointer-events: none;
+      }
+
+      .empty-message {
+        text-align: center;
+        padding: 40px;
+        color: #999;
+        background: white;
+        border-radius: 12px;
+        margin: 10px 0;
+      }
+
+      .count-badge {
+        background: #ff9800;
+        color: white;
+        border-radius: 20px;
+        padding: 2px 10px;
+        font-size: 0.8rem;
+        margin-left: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>
+      ครัวจันทร์เพ็ญ
+      <span id="refreshingStatus" style="display: none">(กำลังรีเฟรช...)</span>
+    </h2>
+
+    <!-- ส่วน Call -->
+    <div id="callSection">
+      <div id="callList"></div>
+    </div>
+
+    <!-- ส่วน Orders -->
+    <div id="ordersSection">
+      <div id="orderList" class="order-container"></div>
+    </div>
+
+    <script type="module">
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-app.js";
+      import {
+        getFirestore,
+        collection,
+        getDocs,
+        updateDoc,
+        doc,
+        query,
+        orderBy,
+        onSnapshot,
+        Timestamp,
+      } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-firestore.js";
+
+      const firebaseConfig = {
+        apiKey: "AIzaSyAhJaUZhl14mlJ7I_FVMu2fuMg6qAKspO4",
+        authDomain: "restaurant-101a.firebaseapp.com",
+        projectId: "restaurant-101a",
+        storageBucket: "restaurant-101a.firebasestorage.app",
+        messagingSenderId: "35898180691",
+        appId: "1:35898180691:web:21e39b2796018d48e432a6",
+        measurementId: "G-5KR88CLQHM"
+      };
+
+      const app = initializeApp(firebaseConfig);
+      const db = getFirestore(app);
+
+      const statusEl = document.getElementById("refreshingStatus");
+      const orderContainer = document.getElementById("orderList");
+      const callContainer = document.getElementById("callList");
+      const orderCountSpan = document.getElementById("orderCount");
+      const callCountSpan = document.getElementById("callCount");
+
+      // ==================== Helper Functions ====================
+      function getNextStatus(current) {
+        console.log(`getNextStatus: current = ${current}`);
+        if (current === "pending") return "cooking";
+        if (current === "cooking") return "done";
+        if (current === "done") return "done";
+        return "cooking";
+      }
+
+      function getStatusColor(status) {
+        if (status === "pending") return "#ff9800";
+        if (status === "cooking") return "#2196F3";
+        if (status === "done") return "#4CAF50";
+        return "#ff9800";
+      }
+
+      function getStatusThai(status) {
+        if (status === "pending") return "รับออเดอร์";
+        if (status === "cooking") return "กำลังปรุง";
+        if (status === "done") return "เสิร์ฟแล้ว";
+        return status;
+      }
+
+      function updateCardStyle(card, status) {
+        card.style.borderLeftColor = getStatusColor(status);
+      }
+
+      function formatTimestamp(timestamp) {
+        if (!timestamp) return "ไม่ทราบเวลา";
+        try {
+          let date;
+          if (timestamp.toDate) {
+            date = timestamp.toDate();
+          } else if (timestamp.seconds) {
+            date = new Date(timestamp.seconds * 1000);
+          } else {
+            date = new Date(timestamp);
+          }
+          return date.toLocaleTimeString("th-TH", {
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+        } catch (e) {
+          return "ไม่ทราบเวลา";
+        }
+      }
+
+      function escapeHtml(text) {
+        if (!text) return "";
+        const div = document.createElement("div");
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
+      function showToast(message, type = "info") {
+        const toast = document.createElement("div");
+        toast.style.cssText = `
+          position: fixed;
+          bottom: 20px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: ${type === "error" ? "#dc2626" : "#16a34a"};
+          color: white;
+          padding: 10px 20px;
+          border-radius: 8px;
+          z-index: 9999;
+          font-size: 14px;
+          animation: fadeInOut 2s ease;
+        `;
+        toast.innerText = message;
+        document.body.appendChild(toast);
+
+        setTimeout(() => {
+          toast.remove();
+        }, 2000);
+      }
+
+      function updateOrderCount() {
+        if (!orderCountSpan) return;
+
+        const orders = document.querySelectorAll(".order-card:not(.fade-out)");
+        const count = orders.length;
+        if (count > 0) {
+          orderCountSpan.style.display = "inline-block";
+          orderCountSpan.innerText = count;
+        } else {
+          orderCountSpan.style.display = "none";
+        }
+      }
+
+      function updateCallCount() {
+        if (!callCountSpan) return;
+
+        const calls = document.querySelectorAll(".call-card:not(.fade-out)");
+        const count = calls.length;
+        if (count > 0) {
+          callCountSpan.style.display = "inline-block";
+          callCountSpan.innerText = count;
+        } else {
+          callCountSpan.style.display = "none";
+        }
+      }
+
+      // ==================== Create Card Functions ====================
+      function createOrderCard(orderId, item) {
+        const card = document.createElement("div");
+        card.className = "order-card";
+        card.dataset.orderId = orderId;
+        card.dataset.status = item.status;
+
+        const timeStr = formatTimestamp(item.createdAt);
+        
+        card.innerHTML = `
+          <div class="order-info">
+            <span class="menu-name">${escapeHtml(item.title)} (x${item.qty})</span>
+            <span class="time-stamp">${timeStr}</span>
+          </div>
+          ${item.option ? `<div class="text-sm text-orange-600 mb-1">🍽️ ตัวเลือก: ${escapeHtml(item.option)}</div>` : ""}
+          ${item.additionalDetail ? `<div class="text-xs text-gray-500 mb-2">📝 ${escapeHtml(item.additionalDetail)}</div>` : ""}
+          <div class="order-status-row">
+            <div>โต๊ะ: ${escapeHtml(item.table)} | สถานะ: <strong>${getStatusThai(item.status)}</strong></div>
+            <div class="badge-session">👤 ${escapeHtml(item.sessionId || '-')}</div>
+          </div>
+        `;
+        
+        updateCardStyle(card, item.status);
+
+        if (item.status === "pending" || item.status === "cooking") {
+          card.onclick = async () => {
+            if (card.style.pointerEvents === "none") return;
+            
+            const currentStatus = card.dataset.status;
+            const nextStatus = getNextStatus(currentStatus);
+            
+            console.log(`🔘 กดที่: ${item.title}, สถานะปัจจุบัน: ${currentStatus} -> ${nextStatus}`);
+            
+            // ถ้ากดจาก pending เปลี่ยนเป็น cooking ให้สั่งพิมพ์ออกเครื่องพิมพ์
+            if (currentStatus === "pending" && nextStatus === "cooking") {
+              printViaRawBTPlain(item);
+            }
+            
+            card.style.opacity = "0.5";
+            card.style.pointerEvents = "none";
+            
+            try {
+              const orderRef = doc(db, "orders", orderId);
+              await updateDoc(orderRef, {
+                status: nextStatus,
+                updatedAt: Timestamp.now()
+              });
+              
+              const statusSpan = card.querySelector("strong");
+              if (statusSpan) statusSpan.innerText = getStatusThai(nextStatus);
+              updateCardStyle(card, nextStatus);
+              card.dataset.status = nextStatus;
+              
+              if (nextStatus === "done") {
+                card.classList.add("fade-out");
+                setTimeout(() => {
+                  if (card.parentNode) card.remove();
+                  updateOrderCount();
+                }, 300);
+              } else {
+                card.style.opacity = "";
+                card.style.pointerEvents = "";
+              }
+              
+            } catch (err) {
+              console.error("❌ Update order failed:", err);
+              showToast("อัปเดตสถานะไม่สำเร็จ", "error");
+              card.style.opacity = "";
+              card.style.pointerEvents = "";
+            }
+          };
+        }
+        
+        return card;
+      }
+
+      function createCallCard(callId, item, type = "staff") {
+        const div = document.createElement("div");
+        div.className = "call-card";
+        div.dataset.callId = callId;
+
+        const timeStr = formatTimestamp(item.createdAt);
+        const isBill = type === "bill";
+        const icon = isBill ? "💵" : "🔔";
+        const label = isBill ? "เรียกสรุปยอด" : "เรียกพนักงาน";
+        const price = item.totalPrice
+          ? Number(item.totalPrice).toLocaleString()
+          : "-";
+
+        div.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <strong>${icon} ${escapeHtml(item.table)} ${label}</strong>
+            </div>
+            <div style="text-align: right;">
+              ${isBill ? `<strong>${price} บาท</strong>` : ""}
+            </div>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+            <div style="font-size: 11px; color: #888;">${timeStr}</div>
+            ${item.sessionId ? `<div style="font-size: 10px; color: #aaa;">👤 ${escapeHtml(item.sessionId)}</div>` : ""}
+          </div>
+        `;
+
+        div.onclick = async () => {
+          if (div.classList.contains("fade-out")) return;
+
+          div.style.pointerEvents = "none";
+          div.classList.add("fade-out");
+
+          try {
+            const ref = doc(
+              db,
+              type === "bill" ? "bills" : "callStaff",
+              callId
+            );
+            await updateDoc(ref, {
+              status: "done",
+              completedAt: Timestamp.now(),
+            });
+
+            setTimeout(() => {
+              if (div.parentNode) div.remove();
+              updateCallCount();
+            }, 300);
+          } catch (err) {
+            console.error("Update call failed:", err);
+            div.classList.remove("fade-out");
+            div.style.pointerEvents = "";
+            showToast("อัปเดตไม่สำเร็จ", "error");
+          }
+        };
+
+        return div;
+      }
+
+      // ==================== Load Orders ====================
+      let unsubscribeOrders = null;
+
+      function setupOrdersListener() {
+        if (unsubscribeOrders) unsubscribeOrders();
+        
+        const q = query(
+          collection(db, "orders"),
+          orderBy("createdAt", "asc")
+        );
+        
+        let isFirstLoad = true;
+        
+        unsubscribeOrders = onSnapshot(q, (snapshot) => {
+          if (isFirstLoad) {
+            statusEl.style.display = "inline";
+          }
+          
+          const activeOrders = [];
+          snapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.status === "pending" || data.status === "cooking") {
+              activeOrders.push({ id: doc.id, ...data });
+            }
+          });
+          
+          if (activeOrders.length === 0) {
+            orderContainer.innerHTML = "<div class='empty-message'>📭 ไม่มีรายการค้าง</div>";
+            updateOrderCount();
+            statusEl.style.display = "none";
+            isFirstLoad = false;
+            return;
+          }
+          
+          if (orderContainer.querySelector('.empty-message')) {
+            orderContainer.innerHTML = "";
+          }
+          
+          const existingCards = new Map();
+          orderContainer.querySelectorAll('.order-card').forEach(card => {
+            if (card.dataset.orderId) {
+              existingCards.set(card.dataset.orderId, card);
+            }
+          });
+          
+          activeOrders.forEach(item => {
+            const existingCard = existingCards.get(item.id);
+            
+            if (!existingCard) {
+              const card = createOrderCard(item.id, item);
+              orderContainer.appendChild(card);
+            } else {
+              const currentStatus = existingCard.dataset.status;
+              if (currentStatus !== item.status) {
+                const statusSpan = existingCard.querySelector("strong");
+                if (statusSpan) statusSpan.innerText = getStatusThai(item.status);
+                updateCardStyle(existingCard, item.status);
+                existingCard.dataset.status = item.status;
+              }
+            }
+          });
+          
+          const activeIds = new Set(activeOrders.map(i => i.id));
+          existingCards.forEach((card, id) => {
+            if (!activeIds.has(id)) {
+              card.classList.add("fade-out");
+              setTimeout(() => {
+                if (card.parentNode) card.remove();
+                updateOrderCount();
+              }, 300);
+            }
+          });
+          
+          updateOrderCount();
+          isFirstLoad = false;
+          statusEl.style.display = "none";
+          
+        }, (error) => {
+          console.error("❌ Orders listener error:", error);
+          orderContainer.innerHTML = `<div class='empty-message' style='color:#dc2626;'>❌ ${error.message}</div>`;
+          statusEl.style.display = "none";
+        });
+      }
+
+      // ==================== Load Calls ====================
+      let unsubscribeCalls = null;
+      let unsubscribeBills = null;
+
+      function setupCallsListener() {
+        if (unsubscribeCalls) unsubscribeCalls();
+        if (unsubscribeBills) unsubscribeBills();
+
+        const staffQuery = query(
+          collection(db, "callStaff"),
+          orderBy("createdAt", "asc")
+        );
+
+        const billQuery = query(
+          collection(db, "bills"),
+          orderBy("createdAt", "asc")
+        );
+
+        let isFirstLoad = true;
+
+        const updateCallList = () => {
+          if (isFirstLoad) {
+            statusEl.style.display = "inline";
+          }
+
+          Promise.all([getDocs(staffQuery), getDocs(billQuery)])
+            .then(([staffSnapshot, billSnapshot]) => {
+              const combined = [];
+
+              staffSnapshot.forEach((doc) => {
+                const data = doc.data();
+                if (data.status === "pending") {
+                  combined.push({
+                    id: doc.id,
+                    type: "staff",
+                    data: data,
+                  });
+                }
+              });
+
+              billSnapshot.forEach((doc) => {
+                const data = doc.data();
+                if (data.status === "requested") {
+                  combined.push({
+                    id: doc.id,
+                    type: "bill",
+                    data: data,
+                  });
+                }
+              });
+
+              if (combined.length === 0) {
+                callContainer.innerHTML =
+                  "<div class='empty-message'>🔕 ไม่มีการแจ้งเตือน</div>";
+                updateCallCount();
+                statusEl.style.display = "none";
+                return;
+              }
+
+              combined.sort((a, b) => {
+                const timeA = a.data.createdAt?.seconds || 0;
+                const timeB = b.data.createdAt?.seconds || 0;
+                return timeA - timeB;
+              });
+
+              callContainer.innerHTML = "";
+
+              combined.forEach((item) => {
+                const card = createCallCard(item.id, item.data, item.type);
+                callContainer.appendChild(card);
+              });
+
+              updateCallCount();
+            })
+            .catch((err) => {
+              console.error("Load calls error:", err);
+              callContainer.innerHTML = `<div class='empty-message' style='color:#dc2626;'>❌ โหลดข้อมูลไม่สำเร็จ: ${err.message}</div>`;
+            })
+            .finally(() => {
+              statusEl.style.display = "none";
+              isFirstLoad = false;
+            });
+        };
+
+        updateCallList();
+        const interval = setInterval(updateCallList, 5000);
+        window.callInterval = interval;
+        unsubscribeCalls = () => clearInterval(interval);
+        unsubscribeBills = () => {};
+      }
+
+      // เพิ่ม animation CSS
+      const style = document.createElement("style");
+      style.textContent = `
+        @keyframes fadeInOut {
+          0% { opacity: 0; transform: translateX(-50%) translateY(20px); }
+          15% { opacity: 1; transform: translateX(-50%) translateY(0); }
+          85% { opacity: 1; transform: translateX(-50%) translateY(0); }
+          100% { opacity: 0; transform: translateX(-50%) translateY(20px); }
+        }
+      `;
+      document.head.appendChild(style);
+
+      // ฟังก์ชันพิมพ์ผ่าน RawBT
+      function printViaRawBTPlain(item) {
+        let text = `*** KITCHEN ORDER ***\n`;
+        text += `โต๊ะ: ${item.table}\n`;
+        text += `เวลา: ${formatTimestamp(item.createdAt)}\n`;
+        text += `--------------------------------\n`;
+        text += `${item.title} x${item.qty}\n`;
+        if (item.option) text += `ตัวเลือก: ${item.option}\n`;
+        if (item.additionalDetail) text += `โน้ต: ${item.additionalDetail}\n`;
+        text += `--------------------------------\n\n\n`;
+
+        const encodedText = encodeURIComponent(text);
+        const rawbtUrl = `rawbt:data;charset=utf-8,${encodedText}`;
+
+        window.location.href = rawbtUrl;
+      }
+      
+      // ==================== Initialize ====================
+      function init() {
+        console.log("🚀 เริ่มต้นระบบ...");
+        setupOrdersListener();
+        setupCallsListener();
+      }
+
+      init();
+    </script>
+  </body>
+</html>
