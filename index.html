@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <base target="_top" /> 
+    <base target="_top" />
     <meta charset="UTF-8" />
     <meta
       name="viewport"
@@ -170,11 +170,29 @@
         font-size: 0.8rem;
         margin-left: 8px;
       }
+
+      /* Print server status indicator */
+      #printServerStatus {
+        font-size: 0.75rem;
+        padding: 2px 8px;
+        border-radius: 10px;
+        margin-left: 8px;
+        font-weight: normal;
+      }
+      #printServerStatus.online {
+        background: #e8f5e9;
+        color: #2e7d32;
+      }
+      #printServerStatus.offline {
+        background: #ffebee;
+        color: #c62828;
+      }
     </style>
   </head>
   <body>
     <h2>
-      ครัวจันทร์เพ็ญ
+      ครัวจันทร์เพ็ญ(slip)
+      <span id="printServerStatus" class="offline">🖨️ กำลังเชื่อมต่อ...</span>
       <span id="refreshingStatus" style="display: none">(กำลังรีเฟรช...)</span>
     </h2>
 
@@ -215,11 +233,18 @@
       const app = initializeApp(firebaseConfig);
       const db = getFirestore(app);
 
+      // ==================== Print Server Config ====================
+      // ⚠️ เปลี่ยน IP นี้ให้ตรงกับเครื่องที่รัน print_server.py
+      const PRINT_SERVER_URL = "http://192.168.1.100:5000";
+      const PRINT_API_KEY = ""; // ถ้าเปิดใช้ API Key ใน Flask ให้ใส่ค่านี้
+      const SHOP_NAME = "ครัวจันทร์เพ็ญ";
+
       const statusEl = document.getElementById("refreshingStatus");
       const orderContainer = document.getElementById("orderList");
       const callContainer = document.getElementById("callList");
       const orderCountSpan = document.getElementById("orderCount");
       const callCountSpan = document.getElementById("callCount");
+      const printServerStatusEl = document.getElementById("printServerStatus");
 
       // ==================== Helper Functions ====================
       function getNextStatus(current) {
@@ -288,6 +313,8 @@
           border-radius: 8px;
           z-index: 9999;
           font-size: 14px;
+          max-width: 90%;
+          text-align: center;
           animation: fadeInOut 2s ease;
         `;
         toast.innerText = message;
@@ -324,6 +351,116 @@
         }
       }
 
+      // ==================== Print Server Status ====================
+      function setPrintServerStatus(online) {
+        if (!printServerStatusEl) return;
+        if (online) {
+          printServerStatusEl.className = "online";
+          printServerStatusEl.innerText = "🖨️ พร้อมพิมพ์";
+        } else {
+          printServerStatusEl.className = "offline";
+          printServerStatusEl.innerText = "🖨️ ออฟไลน์";
+        }
+      }
+
+      async function checkPrintServer() {
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 3000);
+          const res = await fetch(`${PRINT_SERVER_URL}/health`, {
+            signal: controller.signal,
+          });
+          clearTimeout(timeout);
+          setPrintServerStatus(res.ok);
+        } catch (e) {
+          setPrintServerStatus(false);
+        }
+      }
+
+      // ==================== Print Functions ====================
+      // ฟังก์ชันกลางสำหรับส่งงานพิมพ์ไปยัง Print Server (Python/Flask)
+      async function postToPrintServer(payload) {
+        try {
+          const headers = { "Content-Type": "application/json" };
+          if (PRINT_API_KEY) headers["X-API-Key"] = PRINT_API_KEY;
+
+          const res = await fetch(`${PRINT_SERVER_URL}/print`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(payload),
+          });
+
+          const data = await res.json().catch(() => ({}));
+
+          if (!res.ok) {
+            throw new Error(data.message || `HTTP ${res.status}`);
+          }
+
+          console.log("✅ พิมพ์สำเร็จ:", data);
+          setPrintServerStatus(true);
+          return true;
+        } catch (err) {
+          console.error("❌ พิมพ์ไม่สำเร็จ:", err);
+          setPrintServerStatus(false);
+          showToast(`พิมพ์ไม่สำเร็จ: ${err.message}`, "error");
+          return false;
+        }
+      }
+
+      // พิมพ์เข้าครัว (pending -> cooking)
+      async function printKitchenTicket(item) {
+        const timeStr = formatTimestamp(item.createdAt);
+        const payload = {
+          shop_name: SHOP_NAME,
+          order_info: `🍳 เข้าครัว | โต๊ะ ${item.table} | ${timeStr}`,
+          items: [
+            {
+              qty: item.qty,
+              name: item.title + (item.option ? ` (${item.option})` : ""),
+              price: 0,
+            },
+          ],
+          footer: [
+            item.additionalDetail ? `📝 ${item.additionalDetail}` : "",
+            `👤 ${item.sessionId || "-"}`,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        };
+
+        const ok = await postToPrintServer(payload);
+        if (ok) showToast(`พิมพ์เข้าครัว: ${item.title}`, "info");
+      }
+
+      // พิมพ์สลิปเสิร์ฟ (cooking -> done)
+      async function printServedSlip(item) {
+        const now = new Date().toLocaleTimeString("th-TH", {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+
+        const payload = {
+          shop_name: SHOP_NAME,
+          order_info: `✅ เสิร์ฟแล้ว | โต๊ะ ${item.table} | ${now}`,
+          items: [
+            {
+              qty: item.qty,
+              name: item.title + (item.option ? ` (${item.option})` : ""),
+              price: 0,
+            },
+          ],
+          footer: [
+            item.additionalDetail ? `📝 ${item.additionalDetail}` : "",
+            `👤 ${item.sessionId || "-"}`,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        };
+
+        const ok = await postToPrintServer(payload);
+        if (ok) showToast(`พิมพ์สลิปเสิร์ฟ: ${item.title}`, "info");
+      }
+
       // ==================== Create Card Functions ====================
       function createOrderCard(orderId, item) {
         const card = document.createElement("div");
@@ -332,7 +469,7 @@
         card.dataset.status = item.status;
 
         const timeStr = formatTimestamp(item.createdAt);
-        
+
         card.innerHTML = `
           <div class="order-info">
             <span class="menu-name">${escapeHtml(item.title)} (x${item.qty})</span>
@@ -345,38 +482,43 @@
             <div class="badge-session">👤 ${escapeHtml(item.sessionId || '-')}</div>
           </div>
         `;
-        
+
         updateCardStyle(card, item.status);
 
         if (item.status === "pending" || item.status === "cooking") {
           card.onclick = async () => {
             if (card.style.pointerEvents === "none") return;
-            
+
             const currentStatus = card.dataset.status;
             const nextStatus = getNextStatus(currentStatus);
-            
+
             console.log(`🔘 กดที่: ${item.title}, สถานะปัจจุบัน: ${currentStatus} -> ${nextStatus}`);
-            
-            // ถ้ากดจาก pending เปลี่ยนเป็น cooking ให้สั่งพิมพ์ออกเครื่องพิมพ์
+
+            // ✅ พิมพ์เข้าครัว (pending -> cooking) — ไม่ await ให้ UI ไม่รอ
             if (currentStatus === "pending" && nextStatus === "cooking") {
-              printViaRawBTPlain(item);
+              printKitchenTicket(item);
             }
-            
+
+            // ✅ พิมพ์สลิปเสิร์ฟ (cooking -> done)
+            if (currentStatus === "cooking" && nextStatus === "done") {
+              printServedSlip(item);
+            }
+
             card.style.opacity = "0.5";
             card.style.pointerEvents = "none";
-            
+
             try {
               const orderRef = doc(db, "orders", orderId);
               await updateDoc(orderRef, {
                 status: nextStatus,
-                updatedAt: Timestamp.now()
+                updatedAt: Timestamp.now(),
               });
-              
+
               const statusSpan = card.querySelector("strong");
               if (statusSpan) statusSpan.innerText = getStatusThai(nextStatus);
               updateCardStyle(card, nextStatus);
               card.dataset.status = nextStatus;
-              
+
               if (nextStatus === "done") {
                 card.classList.add("fade-out");
                 setTimeout(() => {
@@ -387,7 +529,6 @@
                 card.style.opacity = "";
                 card.style.pointerEvents = "";
               }
-              
             } catch (err) {
               console.error("❌ Update order failed:", err);
               showToast("อัปเดตสถานะไม่สำเร็จ", "error");
@@ -396,7 +537,7 @@
             }
           };
         }
-        
+
         return card;
       }
 
@@ -465,83 +606,88 @@
 
       function setupOrdersListener() {
         if (unsubscribeOrders) unsubscribeOrders();
-        
+
         const q = query(
           collection(db, "orders"),
           orderBy("createdAt", "asc")
         );
-        
+
         let isFirstLoad = true;
-        
-        unsubscribeOrders = onSnapshot(q, (snapshot) => {
-          if (isFirstLoad) {
-            statusEl.style.display = "inline";
-          }
-          
-          const activeOrders = [];
-          snapshot.forEach(doc => {
-            const data = doc.data();
-            if (data.status === "pending" || data.status === "cooking") {
-              activeOrders.push({ id: doc.id, ...data });
+
+        unsubscribeOrders = onSnapshot(
+          q,
+          (snapshot) => {
+            if (isFirstLoad) {
+              statusEl.style.display = "inline";
             }
-          });
-          
-          if (activeOrders.length === 0) {
-            orderContainer.innerHTML = "<div class='empty-message'>📭 ไม่มีรายการค้าง</div>";
-            updateOrderCount();
-            statusEl.style.display = "none";
-            isFirstLoad = false;
-            return;
-          }
-          
-          if (orderContainer.querySelector('.empty-message')) {
-            orderContainer.innerHTML = "";
-          }
-          
-          const existingCards = new Map();
-          orderContainer.querySelectorAll('.order-card').forEach(card => {
-            if (card.dataset.orderId) {
-              existingCards.set(card.dataset.orderId, card);
-            }
-          });
-          
-          activeOrders.forEach(item => {
-            const existingCard = existingCards.get(item.id);
-            
-            if (!existingCard) {
-              const card = createOrderCard(item.id, item);
-              orderContainer.appendChild(card);
-            } else {
-              const currentStatus = existingCard.dataset.status;
-              if (currentStatus !== item.status) {
-                const statusSpan = existingCard.querySelector("strong");
-                if (statusSpan) statusSpan.innerText = getStatusThai(item.status);
-                updateCardStyle(existingCard, item.status);
-                existingCard.dataset.status = item.status;
+
+            const activeOrders = [];
+            snapshot.forEach((doc) => {
+              const data = doc.data();
+              if (data.status === "pending" || data.status === "cooking") {
+                activeOrders.push({ id: doc.id, ...data });
               }
+            });
+
+            if (activeOrders.length === 0) {
+              orderContainer.innerHTML =
+                "<div class='empty-message'>📭 ไม่มีรายการค้าง</div>";
+              updateOrderCount();
+              statusEl.style.display = "none";
+              isFirstLoad = false;
+              return;
             }
-          });
-          
-          const activeIds = new Set(activeOrders.map(i => i.id));
-          existingCards.forEach((card, id) => {
-            if (!activeIds.has(id)) {
-              card.classList.add("fade-out");
-              setTimeout(() => {
-                if (card.parentNode) card.remove();
-                updateOrderCount();
-              }, 300);
+
+            if (orderContainer.querySelector(".empty-message")) {
+              orderContainer.innerHTML = "";
             }
-          });
-          
-          updateOrderCount();
-          isFirstLoad = false;
-          statusEl.style.display = "none";
-          
-        }, (error) => {
-          console.error("❌ Orders listener error:", error);
-          orderContainer.innerHTML = `<div class='empty-message' style='color:#dc2626;'>❌ ${error.message}</div>`;
-          statusEl.style.display = "none";
-        });
+
+            const existingCards = new Map();
+            orderContainer.querySelectorAll(".order-card").forEach((card) => {
+              if (card.dataset.orderId) {
+                existingCards.set(card.dataset.orderId, card);
+              }
+            });
+
+            activeOrders.forEach((item) => {
+              const existingCard = existingCards.get(item.id);
+
+              if (!existingCard) {
+                const card = createOrderCard(item.id, item);
+                orderContainer.appendChild(card);
+              } else {
+                const currentStatus = existingCard.dataset.status;
+                if (currentStatus !== item.status) {
+                  const statusSpan = existingCard.querySelector("strong");
+                  if (statusSpan)
+                    statusSpan.innerText = getStatusThai(item.status);
+                  updateCardStyle(existingCard, item.status);
+                  existingCard.dataset.status = item.status;
+                }
+              }
+            });
+
+            const activeIds = new Set(activeOrders.map((i) => i.id));
+            existingCards.forEach((card, id) => {
+              if (!activeIds.has(id)) {
+                card.classList.add("fade-out");
+                setTimeout(() => {
+                  if (card.parentNode) card.remove();
+                  updateOrderCount();
+                }, 300);
+              }
+            });
+
+            updateOrderCount();
+            isFirstLoad = false;
+            statusEl.style.display = "none";
+          },
+          (error) => {
+            console.error("❌ Orders listener error:", error);
+            orderContainer.innerHTML = `<div class='empty-message' style='color:#dc2626;'>❌ ${error.message}</div>`;
+            statusEl.style.display = "none";
+          }
+        );
       }
 
       // ==================== Load Calls ====================
@@ -647,61 +793,15 @@
       `;
       document.head.appendChild(style);
 
-
-      // ฟังก์ชันสำหรับส่งคำสั่งพิมพ์ไปที่ RawBT
-      function printViaRawBT(item) {
-        // 1. จัดรูปแบบข้อความและคำสั่ง ESC/POS
-        // \x1B\x40 = Initialize
-        // \x1B\x61\x01 = Center, \x1B\x61\x00 = Left
-        // \x1D\x21\x11 = Text size x2
-        // \x1D\x21\x00 = Normal text
-        // \x1D\x56\x42\x00 = Auto Cut (สำหรับเครื่องที่มีตัดกระดาษอัตโนมัติ)
-        
-        let escPosText = "";
-        escPosText += "\x1B\x40";               // Init
-        escPosText += "\x1B\x61\x01";           // จัดกลาง
-        escPosText += "*** KITCHEN ORDER ***\n";
-        escPosText += "\x1B\x61\x00";           // จัดซ้าย
-        escPosText += "--------------------------------\n";
-        escPosText += `โต๊ะ: ${item.table}\n`;
-        escPosText += `เวลา: ${formatTimestamp(item.createdAt)}\n`;
-        escPosText += "--------------------------------\n";
-        escPosText += `\x1D\x21\x11${item.title} x${item.qty}\x1D\x21\x00\n`; // ตัวหนา/ใหญ่
-        
-        if (item.option) {
-          escPosText += `ตัวเลือก: ${item.option}\n`;
-        }
-        if (item.additionalDetail) {
-          escPosText += `โน้ต: ${item.additionalDetail}\n`;
-        }
-        
-        escPosText += "--------------------------------\n";
-        escPosText += `เลขอ้างอิง: ${item.sessionId || '-'}\n\n\n`;
-        escPosText += "\x1D\x56\x42\x00";      // คำสั่งตัดกระดาษ (ถ้าเครื่องรองรับ)
-
-        // 2. แปลงข้อความ (UTF-8) เป็น Base64 เพื่อความถูกต้องของภาษาไทย
-        // ใช้ TextEncoder รองรับภาษาไทยบนเว็บเบราว์เซอร์ยุคใหม่
-        const utf8Bytes = new TextEncoder().encode(escPosText);
-        let binaryString = "";
-        for (let i = 0; i < utf8Bytes.length; i++) {
-          binaryString += String.fromCharCode(utf8Bytes[i]);
-        }
-        const base64Data = btoa(binaryString);
-
-        // 3. เรียกใช้งาน RawBT ผ่าน URL Scheme
-        const rawbtUrl = `rawbt:data:base64,${base64Data}`;
-        
-        // สร้างลิงก์หลอกแล้วสั่งคลิกเพื่อเปิดแอป RawBT ขึ้นมาพิมพ์
-        const link = document.createElement("a");
-        link.href = rawbtUrl;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-      }
-      
       // ==================== Initialize ====================
       function init() {
         console.log("🚀 เริ่มต้นระบบ...");
+        console.log("🖨️ Print Server:", PRINT_SERVER_URL);
+
+        // เช็ค print server ทันที และทุก 30 วินาที
+        checkPrintServer();
+        setInterval(checkPrintServer, 30000);
+
         setupOrdersListener();
         setupCallsListener();
       }
